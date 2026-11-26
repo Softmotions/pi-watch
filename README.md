@@ -118,7 +118,7 @@ Operators: `eq`, `ne`, `gt`, `lt`, `in`, `regex`, `contains`, combined with `all
 
 ## Sleep guard
 
-`bash` calls with `sleep N` (N ≥ 10s) or any `for/while/until … sleep … done` loop are **blocked** with a hint to use a watch instead. Short sleeps and `sleep` inside quotes/comments pass.
+`bash` calls with `sleep N` (N ≥ 10s) or any `for/while/until … sleep … done` loop are **blocked** with a hint to use a watch instead. Short sleeps, `sleep` inside quotes/comments, and heredoc bodies (`cat > run.sh <<'EOF' … EOF`) pass: the body is text being written, not shell being run.
 
 ## Long bash guard
 
