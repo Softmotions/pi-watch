@@ -79,6 +79,64 @@ test("a matching output line settles while the process keeps running", async () 
 	assert.equal(m.listProcesses()[0].status, "running");
 });
 
+test("process output is matched by stdout and stderr text conditions", async () => {
+	const m = makeManager();
+	const ok = m.startProcess({ cmd: "echo 'up exit=0'" });
+	m.createWatch({
+		goal: "tests pass",
+		source: { kind: "process", id: ok.id },
+		success: { stdout: { contains: "exit=0" } },
+		timeoutMs: 5000,
+	});
+	const [first] = await nextBatch(m);
+	assert.equal(first.outcome, "success");
+	assert.equal(first.reason, "success condition matched");
+
+	const bad = m.startProcess({ cmd: "echo 'boom' >&2; exit 0" });
+	m.createWatch({
+		goal: "no stderr noise",
+		source: { kind: "process", id: bad.id },
+		success: { exitCode: { eq: 0 } },
+		failure: { stderr: { contains: "boom" } },
+		timeoutMs: 5000,
+	});
+	const [second] = await nextBatch(m);
+	assert.equal(second.outcome, "failure");
+	assert.equal(second.reason, "failure condition matched");
+});
+
+test("watch on an already-exited process can match its output text", async () => {
+	const m = makeManager();
+	const proc = m.startProcess({ cmd: "echo 'Tests run: 3, Failures: 0'; exit 0" });
+	while (m.listProcesses()[0].status === "running") await new Promise((r) => setTimeout(r, 10));
+	m.createWatch({
+		goal: "no test failures",
+		source: { kind: "process", id: proc.id },
+		success: { stdout: { regex: "Failures: 0" } },
+		timeoutMs: 5000,
+	});
+	const [result] = await nextBatch(m);
+	assert.equal(result.outcome, "success");
+	assert.equal(result.observation.event, "exit");
+});
+
+test("stdout conditions match output beyond the in-memory line tail", async () => {
+	const m = makeManager({ tailLines: 5 });
+	const proc = m.startProcess({ cmd: "echo 'early-marker'; seq 1 500" });
+	while (m.listProcesses()[0].status === "running") await new Promise((r) => setTimeout(r, 10));
+	m.createWatch({
+		goal: "marker printed",
+		source: { kind: "process", id: proc.id },
+		success: { stdout: { contains: "early-marker" } },
+		timeoutMs: 5000,
+	});
+	const [result] = await nextBatch(m);
+	assert.equal(result.outcome, "success");
+	assert.equal(result.observation.event, "exit");
+	assert.match(String(result.observation.stdout), /^early-marker\n1\n/);
+	assert.doesNotMatch(result.tail, /early-marker/);
+});
+
 test("watch on an already-exited process settles immediately", async () => {
 	const m = makeManager();
 	const proc = m.startProcess({ cmd: "exit 0" });

@@ -41,7 +41,7 @@ Watches settling within ~2s of each other are delivered in a single message. If 
 
 ### Sources
 
-- **process** — a command started in the background with `process_start`. Conditions are checked on every output line (`line`, `stream`) and on exit (`exitCode`, `signal`).
+- **process** — a command started in the background with `process_start`. Conditions are checked on every output line (`line`, `stream`, plus the `stdout`/`stderr` text seen so far) and on exit (`exitCode`, `signal`, `stdout`, `stderr`).
 - **poll** — a cheap status command re-run every `intervalMs` (default 15s, min 2s, optional backoff) *outside* the turn. Conditions see `exitCode`, `stdout`, `stderr`, `json` (stdout parsed as JSON), `attempt`.
 
 ### Conditions
@@ -57,6 +57,8 @@ Declarative, no `eval`:
 
 Operators: `eq`, `ne`, `gt`, `lt`, `in`, `regex`, `contains`, combined with `all` / `any`. A field absent from the observation never matches (an output line has no `exitCode`).
 
+`stdout` and `stderr` work for both sources: for a **process** they are the output seen so far (bounded, last 64 KB), so `{ "stdout": { "contains": "exit=0" } }` matches a process watch too; for a **poll** they are that attempt's output.
+
 ## Examples
 
 **Tests in the background**
@@ -64,6 +66,8 @@ Operators: `eq`, `ne`, `gt`, `lt`, `in`, `regex`, `contains`, combined with `all
 ```jsonc
 // process_start
 { "cmd": "npm test", "watch": { "goal": "test suite passes", "success": { "exitCode": { "eq": 0 } }, "timeoutMs": 600000 } }
+// or wait for a marker in the output ($? captured by the shell, since exit codes arrive only at the end)
+{ "cmd": "npm test 2>&1; echo \"exit=$?\"", "watch": { "goal": "test suite passes", "success": { "stdout": { "contains": "exit=0" } }, "timeoutMs": 600000 } }
 ```
 
 **npm publish propagation**

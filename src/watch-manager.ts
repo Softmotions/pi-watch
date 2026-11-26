@@ -78,6 +78,8 @@ interface ProcState {
 	info: ProcessInfo;
 	child: ChildProcess;
 	lines: string[];
+	/** Bounded stdout/stderr text so conditions can match the whole output, not just one line. */
+	text: { stdout: string; stderr: string };
 	log: WriteStream;
 }
 
@@ -93,6 +95,7 @@ interface WatchState {
 }
 
 const SHELL = existsSync("/bin/bash") ? "/bin/bash" : "/bin/sh";
+const MATCH_TEXT_BYTES = 64 * 1024;
 
 export class WatchManager {
 	private opts: Required<ManagerOptions>;
@@ -134,7 +137,7 @@ export class WatchManager {
 			startedAt: Date.now(),
 			logPath,
 		};
-		const state: ProcState = { info, child, lines: [], log };
+		const state: ProcState = { info, child, lines: [], text: { stdout: "", stderr: "" }, log };
 		this.procs.set(id, state);
 		for (const [streamName, stream] of [["stdout", child.stdout!], ["stderr", child.stderr!]] as const) {
 			let buf = "";
@@ -252,7 +255,15 @@ export class WatchManager {
 	private onLine(state: ProcState, line: string, stream: "stdout" | "stderr"): void {
 		state.lines.push(line);
 		if (state.lines.length > this.opts.tailLines) state.lines.shift();
-		const observation = { event: "line", line, stream, elapsedMs: Date.now() - state.info.startedAt };
+		state.text[stream] = appendCapped(state.text[stream], line, MATCH_TEXT_BYTES);
+		const observation = {
+			event: "line",
+			line,
+			stream,
+			stdout: state.text.stdout,
+			stderr: state.text.stderr,
+			elapsedMs: Date.now() - state.info.startedAt,
+		};
 		for (const w of this.watchesOn(state.info.id)) {
 			if (matches(w.spec.success, observation)) this.settle(w, "success", "success condition matched", observation, state);
 			else if (w.spec.failure && matches(w.spec.failure, observation))
@@ -324,6 +335,8 @@ export class WatchManager {
 			event: "exit",
 			exitCode: state.info.exitCode,
 			signal: state.info.signal,
+			stdout: state.text.stdout,
+			stderr: state.text.stderr,
 			elapsedMs: (state.info.endedAt ?? Date.now()) - state.info.startedAt,
 		};
 		if (matches(w.spec.success, observation)) this.settle(w, "success", "success condition matched", observation, state);
@@ -375,6 +388,12 @@ function tailText(text: string, maxLines: number, maxBytes: number): string {
 	let out = text.split("\n").slice(-maxLines).join("\n");
 	if (out.length > maxBytes) out = "…" + out.slice(-maxBytes);
 	return out;
+}
+
+/** Keep the last ~maxBytes of output. Trims at 2x so appended lines cost amortized O(1). */
+function appendCapped(text: string, line: string, maxBytes: number): string {
+	const next = text ? `${text}\n${line}` : line;
+	return next.length > maxBytes * 2 ? "…" + next.slice(-maxBytes) : next;
 }
 
 function humanMs(ms: number): string {

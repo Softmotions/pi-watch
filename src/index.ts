@@ -24,7 +24,7 @@ const LONG_COMMANDS = parseLongCommands(env.PI_WATCH_LONG_COMMANDS);
 
 const Condition = (description: string) =>
 	Type.Record(Type.String(), Type.Any(), {
-		description: `${description}. Shape: { "<field>": { "<op>": value }, ... } (all fields must match) or { "all": [cond...] } / { "any": [cond...] }. Ops: eq, ne, gt, lt, in (array), regex, contains. Fields: exitCode, stdout, stderr, json.<path> (stdout parsed as JSON), line (process output line), stream, signal, elapsedMs, attempt.`,
+		description: `${description}. Shape: { "<field>": { "<op>": value }, ... } (all fields must match) or { "all": [cond...] } / { "any": [cond...] }. Ops: eq, ne, gt, lt, in (array), regex, contains. Fields: exitCode, stdout, stderr, json.<path> (stdout parsed as JSON), line (process output line), stream, signal, elapsedMs, attempt. For a process, stdout/stderr hold the output seen so far; for a poll, the output of that attempt.`,
 	});
 
 const WatchFields = {
@@ -50,7 +50,7 @@ const PollSchema = Type.Object({
 
 const GUIDELINES = [
 	"Never wait inside bash with `sleep N` or `for/while/until ... sleep ... done` loops: they block the turn, hit the bash timeout and waste context. Register a watch and end your turn instead; you will be woken up with the result.",
-	"Long-running command (tests, build, deploy script, `gh run watch`): process_start with an inline `watch` (e.g. success { exitCode: { eq: 0 } }). For a server, wait for a line: success { line: { regex: \"Listening on\" } }.",
+	"Long-running command (tests, build, deploy script, `gh run watch`): process_start with an inline `watch` (e.g. success { exitCode: { eq: 0 } }). For a server, wait for a line: success { line: { regex: \"Listening on\" } }. A process watch can also match its whole output so far: success { stdout: { contains: \"exit=0\" } } (stdout/stderr are present for process and poll sources alike).",
 	"External state that changes on its own (npm registry propagation, CI status, deploy health, PR merged): watch_create with `poll` and a cheap status command. Examples: npm → poll.cmd `npm view <pkg> version --prefer-online`, success { stdout: { eq: \"1.2.3\" } }; GitHub Actions → `gh run view <id> --json status,conclusion`, success { all: [{ \"json.status\": { eq: \"completed\" } }, { \"json.conclusion\": { eq: \"success\" } }] }, failure { all: [{ \"json.status\": { eq: \"completed\" } }, { \"json.conclusion\": { ne: \"success\" } }] }; HTTP → `curl -s -o /dev/null -w '%{http_code}' <url>`, success { stdout: { eq: \"200\" } }.",
 	"Always set timeoutMs to a realistic estimate and add a failure condition when one exists, so the wait can never hang forever.",
 	"After registering a watch, tell the user what you are waiting for and END YOUR TURN. Do not call watch_list repeatedly to check progress; the result is delivered to you automatically.",
